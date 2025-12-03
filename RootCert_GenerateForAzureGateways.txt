@@ -1,0 +1,111 @@
+#
+##
+### PLEASE SAVE TO PS1
+
+# STEP 0 - Set parameters. Create the directory and change location
+
+$Path = "C:\Temp"
+$DirName = "vnetgateway-nttdomain-dev01-CertDirectory"
+$CertPassword = "Please Specify"
+$PreDefinedCertFileName_String = "vnetgateway-nttdomain-dev01-"
+$CertificatePath = "Cert:\CurrentUser\My"
+
+# Testing Certificate Path, remove the existing (Commenting if it is not needed)
+$ExistingCertificateList = Get-ChildItem -Path $CertificatePath
+foreach($Specific_ExistingCertificateList in $ExistingCertificateList){
+
+    Write-Host "Detected Existing Certificate (RELATED TO THIS CERT NAME ONLY):"
+    Write-Host $Specific_ExistingCertificateList.Subject
+    Write-Host $Specific_ExistingCertificateList.PSPath
+    if(($Specific_ExistingCertificateList.Subject -eq "CN=$($PreDefinedCertFileName_String)P2SVPNClient") -or ($Specific_ExistingCertificateList.Subject -eq "CN=$($PreDefinedCertFileName_String)P2SRootCert")){
+        $true
+        Remove-Item -Path $Specific_ExistingCertificateList.PSPath -Recurse -Force
+    }else{
+        $false
+    }
+
+}
+
+# Checking the certificate local directories (Commenting if it is not needed)
+if(Test-Path -Path "$($Path)\$($DirName)"){
+    Remove-Item -Path "$($Path)\$($DirName)" -Recurse -Force
+}
+
+New-Item -ItemType Directory -Path $Path -Name $DirName -Force
+Set-Location -Path "$($Path)\$($DirName)"
+
+###
+##
+#
+
+#
+##
+###
+
+# STEP 1 - To Create Root Certificate
+# Create the self-signed Root CA (same as OpenSSL x509 root)
+$rootCert = New-SelfSignedCertificate `
+    -Type Custom `
+    -KeyExportPolicy Exportable `
+    -KeyLength 2048 `
+    -KeyAlgorithm RSA `
+    -KeySpec Signature `
+    -HashAlgorithm SHA256 `
+    -Subject "CN=$($PreDefinedCertFileName_String)P2SRootCert" `
+    -CertStoreLocation "$($CertificatePath)" `
+    -KeyUsageProperty Sign `
+    -KeyUsage CertSign, CRLSign `
+    -NotAfter (Get-Date).AddMonths(24)
+    
+
+# Export private key + certificate (PFX)
+$Password = ConvertTo-SecureString -String $CertPassword -Force -AsPlainText
+
+Export-PfxCertificate -Cert $rootCert -FilePath "$($PreDefinedCertFileName_String)P2SRootCA.pfx" -Password $Password -Force
+
+#Export certificate only (CRT/PEM)
+Export-Certificate -Cert $rootCert -FilePath "$($PreDefinedCertFileName_String)P2SRootCA.cer" -Force
+
+certutil -encode "$($PreDefinedCertFileName_String)P2SRootCA.cer" "$($PreDefinedCertFileName_String)P2SRootCA.pem" 
+
+###
+##
+#
+
+#
+##
+###
+
+# STEP 2 - To Create Client Certificate signed by the root certificate (created in STEP 1)
+# Create the client certificate request
+$clientReq = New-SelfSignedCertificate `
+    -Type Custom `
+    -KeyExportPolicy Exportable `
+    -KeyLength 2048 `
+    -KeyAlgorithm RSA `
+    -HashAlgorithm SHA256 `
+    -NotAfter (Get-Date).AddMonths(24) `
+    -KeySpec Signature `
+    -Subject "CN=$($PreDefinedCertFileName_String)P2SVPNClient" `
+    -DnsName "$($PreDefinedCertFileName_String)P2SVPNClient" `
+    -CertStoreLocation "$($CertificatePath)" `
+    -Signer $rootCert `
+    -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.2")
+
+
+ 
+
+# Export PFX
+Export-PfxCertificate -Cert $clientReq -FilePath "$($PreDefinedCertFileName_String)P2SVPNClient.pfx" -Password $Password -Force
+
+# Export public certificate
+Export-Certificate -Cert $clientReq -FilePath "$($PreDefinedCertFileName_String)P2SVPNClient.cer" -Force
+
+certutil -encode "$($PreDefinedCertFileName_String)P2SVPNClient.cer" "$($PreDefinedCertFileName_String)P2SVPNClient.crt"
+
+###
+##
+#
+
+
+
